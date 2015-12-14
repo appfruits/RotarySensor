@@ -1,0 +1,195 @@
+#usage "<qt><nobr>This ULP calculates and place a rotary capacitive sensor.<p>"
+       "<author>Author: Dan Afonso <dafonso@afonsoconsulting.com>, </author></nobr></qt>";
+// THIS PROGRAM IS PROVIDED AS IS AND WITHOUT WARRANTY OF ANY KIND,
+// EXPRESSED OR IMPLIED.
+//Globals
+string solderpoint      = "";
+string file;
+string s;  //temporary string
+int c; // temporary counter
+// Basic parameters
+real outerRadius        = 15.0;
+real innerRadius        = 6.0;
+real bandMaximum        = 4;
+int channels            = 3;
+real channelGap            = 1;
+real channelSpacing        = 2.0;
+int debug                = 1;
+real rad2deg            = 360/(2*PI);
+// Converts from radial coordinates to Cartesian. This returns the X portion
+real r2c_x(real r, real a, real o){
+    return (r*cos(a)) + (o*sin(a));
+}
+// Converts from radial coordinates to Cartesian. This returns the Y portion
+real r2c_y(real r, real a, real o){
+    return (r*sin(a)) - (o*cos(a));
+}
+// The actual work.
+void doIt(void){
+    // Setup
+    string cmd = "CHANGE WIDTH .5;\nGRID mm;SET WIRE_BEND 2;\n";
+    real channelAngles[];
+
+    // Figure out how wide our bands are going to be
+    int bands = 3;
+    real bandWidth = (outerRadius - innerRadius - 0.2)/real(bands);
+    bandWidth = bandWidth * 0.95;
+    sprintf(s, "# Bands: %d, Band width: %.4f\n", bands, bandWidth);
+    cmd += s;
+
+    // Draw the tDocu layer
+
+    sprintf( s, "Change layer %d;\n", 51);
+    cmd += s;
+    sprintf(s, "CIRCLE (0 0) (%.4f 0);\n", outerRadius+1);
+    cmd += s;
+    sprintf(s, "CIRCLE (0 0) (%.4f 0);\n", innerRadius);
+    cmd += s;
+    sprintf(s, "CHANGE WIDTH .1;\n");
+    cmd += s;
+
+    // Get our angles for the channels
+
+    for (c = 0; c < channels; c++){
+        channelAngles[c] = (c*2*PI)/real(channels);
+
+        sprintf(s, "WIRE (%.4f %.4f) (%.4f %.4f);\n",
+            r2c_x(innerRadius, channelAngles[c], 0), r2c_y(innerRadius, channelAngles[c], 0),
+            r2c_x(outerRadius+1, channelAngles[c], 0), r2c_y(outerRadius+1, channelAngles[c], 0));
+        cmd += s;
+        sprintf(s, "WIRE (%.4f %.4f) (%.4f %.4f);\n",
+            r2c_x(innerRadius, channelAngles[c], channelSpacing/2), r2c_y(innerRadius, channelAngles[c], channelSpacing/2),
+            r2c_x(outerRadius+1, channelAngles[c], channelSpacing/2), r2c_y(outerRadius+1, channelAngles[c], channelSpacing/2));
+        cmd += s;
+        sprintf(s, "WIRE (%.4f %.4f) (%.4f %.4f);\n",
+            r2c_x(innerRadius, channelAngles[c], -1*channelSpacing/2), r2c_y(innerRadius, channelAngles[c], -1*channelSpacing/2),
+            r2c_x(outerRadius+1, channelAngles[c], -1*channelSpacing/2), r2c_y(outerRadius+1, channelAngles[c], -1*channelSpacing/2));
+        cmd += s;
+
+    }
+
+    // and add band markings
+    for (c = 0; c < bands; c++){
+        sprintf(s, "CIRCLE (0 0) (%.4f 0);\n", innerRadius + c * bandWidth);
+        if (c > 0) cmd += s;       
+    }
+
+    // OK, now to draw the polygons
+    cmd += "CHANGE LAYER 1;\n";
+    cmd += "CHANGE WIDTH .1;\n";
+    real gap = channelGap / 2;
+    real spacing = channelSpacing / 2;
+    real arcAngle = channelAngles[1] * rad2deg;
+    for (c = 0; c < channels; c++){
+        // Add some clarity by defining these
+        real channelAngleStart = channelAngles[channels - 1];
+        if (c > 0) channelAngleStart = channelAngles[c - 1];
+        real channelAngleStop = channelAngles[0];
+        if (c < channels) channelAngleStop = channelAngles[c + 1];
+        sprintf(s, "# Channel %d. %d Bands. Starts at (%.2f, %.1f) (with offsets) and goes from %.1f degrees to %.1f degrees\n",
+            c + 1, bands, innerRadius, channelAngles[c] * rad2deg,  channelAngleStart * rad2deg, channelAngleStop * rad2deg);
+        cmd += s;
+        sprintf(s, "POLYGON (%.4f %.4f) -%2f ",
+            r2c_x(innerRadius, channelAngles[c], /*gap - spacing*/0), r2c_y(innerRadius, channelAngles[c], /*gap - spacing*/0), arcAngle);
+        cmd += s;
+        for (int b = 0; b < bands; b++){
+            real bandStart = innerRadius + (b * bandWidth);
+            real bandEnd = bandStart + bandWidth;
+            real bandMid = bandStart + (bandWidth / 2);
+            // Draw the band
+            sprintf(s, "(%.4f %.4f) +%.2f (%.4f %.4f) (%.4f %.4f) -%2f ",
+                r2c_x(bandStart, channelAngleStart, 0 - spacing - gap), r2c_y(bandStart, channelAngleStart, 0 - spacing - gap), arcAngle,
+                r2c_x(bandMid - gap, channelAngles[c], spacing - gap), r2c_y(bandMid - gap, channelAngles[c], spacing - gap),
+                r2c_x(bandMid + gap, channelAngles[c], spacing - gap), r2c_y(bandMid + gap, channelAngles[c], spacing - gap),
+                arcAngle);
+            cmd += s;
+        }
+
+        // bring it around to the other side
+        sprintf(s, "(%.4f %.4f) +%.2f (%.4f %.4f) +%.2f ",
+            r2c_x(outerRadius + gap, channelAngleStart, 0 - gap - spacing), r2c_y(outerRadius + gap, channelAngleStart, 0 - gap - spacing),
+            arcAngle,
+            r2c_x(outerRadius, channelAngles[c], gap - spacing), r2c_y(outerRadius, channelAngles[c], gap - spacing),
+            arcAngle
+            );
+        cmd += s;
+
+        // Work our way in
+        for (b = bands - 1; b >= 0; b--){
+            real bandStart = innerRadius + (b * bandWidth);
+            real bandMid = bandStart + (bandWidth / 2);
+            // Draw the band
+            sprintf(s, "(%.4f %.4f) -%.2f (%.4f %.4f) (%.4f %.4f)  +%.2f ",
+                r2c_x(bandMid, channelAngleStop, gap + spacing), r2c_y(bandMid, channelAngleStop, gap + spacing), arcAngle,
+                r2c_x(bandStart + gap, channelAngles[c], 0 - spacing + gap), r2c_y(bandStart + gap, channelAngles[c], 0 - spacing + gap),
+                r2c_x(bandStart - gap, channelAngles[c], 0 - spacing + gap), r2c_y(bandStart - gap, channelAngles[c], 0 - spacing + gap), arcAngle
+                );
+            cmd += s;
+        }
+        // Close the arc
+        sprintf(s, "(%.4f %.4f) ",
+            r2c_x(innerRadius, channelAngles[c], /*gap - spacing*/0), r2c_y(innerRadius, channelAngles[c], /*gap - spacing*/0));
+        cmd += s;
+        cmd += ";\n";
+    }
+
+    // Add the pads
+    for (c = 0; c < channels; c++){
+        sprintf(s, "PAD 1.6764 round 'p%d' (%.4f %.4f)\n",
+            c,
+            r2c_x(innerRadius + 1, channelAngles[c], 0), r2c_y(innerRadius + 1, channelAngles[c], 0));
+        cmd +=s;
+    }
+    // Finish up
+    output(file, "wtD") printf("%s", cmd);
+    sprintf(cmd, "SCRIPT '%s';", file);
+    exit (cmd);
+}
+// *** main ***
+// Setup
+if (board) {
+  board(B) file = filesetext(B.name, ".scr");
+  solderpoint = ";\nVIA ";
+}
+else if (package) {
+  library(L) file = filesetext(L.name, ".scr");
+  solderpoint = ";\nPAD ";
+}
+else {
+  dlgMessageBox("Start this ULP in a Board- or Package-Editor!", "OK");
+  exit(0);
+}
+// Dialog
+real bandMinimum        = 5.0;
+/*
+real bandMaximum        = 8.0;
+int channels            = 3;
+real channelGap            = .1;
+int debug                = 1;
+*/
+dlgDialog(filename(argv[0])) {
+    dlgVBoxLayout {
+        dlgLabel("<nobr> All measures in <b>mm</b> </nobr>");
+        dlgGridLayout {
+            dlgCell(0,0) dlgLabel("Outer Raidus");
+            dlgCell(0,1) dlgRealEdit(outerRadius, 10.0, 100.0);
+            dlgCell(1,0) dlgLabel("Inner Raidus");
+            dlgCell(1,1) dlgRealEdit(innerRadius, 5.0, 30.0);
+        }
+    }
+    dlgHBoxLayout {
+        dlgPushButton("OK") {
+            int ok = 1;
+
+            if (innerRadius > (outerRadius - bandMinimum)){
+                ok = 0;
+                sprintf(s, "<qt>Inner Radius is too large");
+                dlgMessageBox(s, "OK");
+            }
+            if (ok) {
+                dlgAccept();
+                doIt();
+            }
+        }
+    }
+};
